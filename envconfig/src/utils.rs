@@ -1,48 +1,63 @@
-use std::env;
-use std::str::FromStr;
+use std::{
+    convert::TryFrom,
+    env, error,
+    ffi::{OsStr, OsString},
+};
 
 use Error;
 
-/// Load a nenvironment variable by name and parse it into type `T`.
+/// Load an environment variable by name and parse it into type `T`.
 /// The function is used by `envconfig_derive` to implement `init()`.
+///
+/// Used by types that require starting from an [`OsString`]
 ///
 /// It returns `Error` in the following cases:
 /// - Environment variable is not present
 /// - Parsing failed
-pub fn load_var<T: FromStr>(var_name: &'static str) -> Result<T, Error> {
-    env::var(var_name)
-        .map_err(|_| Error::EnvVarMissing { name: var_name })
-        .and_then(|string_value| {
-            string_value
-                .parse::<T>()
-                .map_err(|_| Error::ParseError { name: var_name })
-        })
+pub fn load_var<T, K>(var_name: K) -> Result<T, Error>
+where
+    T: TryFrom<OsString>,
+    <T as TryFrom<OsString>>::Error: error::Error + 'static,
+    K: AsRef<OsStr>,
+{
+    let var_name = var_name.as_ref();
+    match env::var_os(var_name) {
+        Some(var) => T::try_from(var).map_err(|e| Error::ParseError {
+            name: var_name.to_os_string(),
+            info: Box::new(e),
+        }),
+        None => Err(Error::EnvVarMissing {
+            name: var_name.to_os_string(),
+        }),
+    }
 }
 
-pub fn load_var_with_default<T: FromStr>(
-    var_name: &'static str,
-    default: &'static str,
-) -> Result<T, Error> {
-    let res_var = env::var(var_name);
-
-    let string_value = match res_var {
-        Err(_) => default,
-        Ok(ref value) => value,
-    };
-
-    string_value
-        .parse::<T>()
-        .map_err(|_| Error::ParseError { name: var_name })
+pub fn load_var_with_default<T, K>(var_name: K, default: OsString) -> Result<T, Error>
+where
+    T: TryFrom<OsString>,
+    <T as TryFrom<OsString>>::Error: error::Error + 'static,
+    K: AsRef<OsStr>,
+{
+    let var_name = var_name.as_ref();
+    let var = env::var_os(var_name).unwrap_or(default);
+    T::try_from(var).map_err(|e| Error::ParseError {
+        name: var_name.to_os_string(),
+        info: Box::new(e),
+    })
 }
 
-pub fn load_optional_var<T: FromStr>(var_name: &'static str) -> Result<Option<T>, Error> {
-    let res_var = env::var(var_name);
-
-    match res_var {
-        Err(_) => Ok(None),
-        Ok(string_value) => string_value
-            .parse::<T>()
-            .map(Some)
-            .map_err(|_| Error::ParseError { name: var_name }),
+pub fn load_optional_var<T, K>(var_name: K) -> Result<Option<T>, Error>
+where
+    T: TryFrom<OsString>,
+    <T as TryFrom<OsString>>::Error: error::Error + 'static,
+    K: AsRef<OsStr>,
+{
+    let var_name = var_name.as_ref();
+    match env::var_os(var_name) {
+        Some(var) => T::try_from(var).map(Some).map_err(|e| Error::ParseError {
+            name: var_name.to_os_string(),
+            info: Box::new(e),
+        }),
+        None => Ok(None),
     }
 }
